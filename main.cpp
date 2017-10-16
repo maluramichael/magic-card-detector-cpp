@@ -121,7 +121,9 @@ int main(int argc, const char* const* argv) {
     cv::Mat frame = cv::imread(args::get(imagePath));
     cv::Mat outputFrame = handleImage(frame, showWindows);
     
-    if (!showWindows) {
+    if (showWindows) {
+      cv::waitKey();
+    } else {
       std::cout << "Save output image " << outputFilename << '\n';
       cv::imwrite(outputFilename, outputFrame);
     }
