@@ -121,8 +121,7 @@ int main(int argc, const char* const* argv) {
     cv::Mat frame = cv::imread(args::get(imagePath));
     cv::Mat outputFrame = handleImage(frame, showWindows);
     
-    if (showWindows) {
-    } else {
+    if (!showWindows) {
       std::cout << "Save output image " << outputFilename << '\n';
       cv::imwrite(outputFilename, outputFrame);
     }
@@ -140,7 +139,7 @@ int main(int argc, const char* const* argv) {
       
       if (frame.empty()) { break; }
       
-      handleImage(frame, showWindows);
+      handleImage(frame, showWindows || useWebcam);
       
       if (cv::waitKey(1) == 27) { break; }
     }
