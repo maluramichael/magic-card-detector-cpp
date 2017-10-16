@@ -1,1 +1,4 @@
 cmake-build-debug
+.DS_Store
+.idea/
+images/*converted.png
