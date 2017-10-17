@@ -5,3 +5,4 @@ images/*converted.png
 images/*.txt
 *.bin
 *.dat
+debug/**
