@@ -97,8 +97,8 @@ cv::Mat detectCard(cv::Mat &input, Options &options) {
     cv::Mat working;
     cv::cvtColor(frame, working, cv::COLOR_BGR2GRAY);
 
-    cv::blur(working, working, cv::Size(6,6));
-    cv::imwrite("debug/blured.png", working);
+    cv::blur(working, working, cv::Size(6, 6));
+//    cv::imwrite("debug/blured.png", working);
     if (options.showWindows) { cv::imshow("blured", working); }
 
     cv::dilate(working, working, cv::Mat(), cv::Point(-1, -1), 3, 1, 1);
@@ -106,11 +106,11 @@ cv::Mat detectCard(cv::Mat &input, Options &options) {
 
     cv::threshold(working, working, 0, 255, CV_THRESH_OTSU + CV_THRESH_BINARY);
     //cv::adaptiveThreshold(working, working, 255, cv::ADAPTIVE_THRESH_MEAN_C, cv::THRESH_BINARY_INV, 105, 1);
-    cv::imwrite("debug/threshold.png", working);
+//    cv::imwrite("debug/threshold.png", working);
     if (options.showWindows) { cv::imshow("threshold", working); }
 
     cv::Canny(working, working, 100, 200);
-    cv::imwrite("debug/canny.png", working);
+//    cv::imwrite("debug/canny.png", working);
     if (options.showWindows) { cv::imshow("working", working); }
 
     output = working.clone();
@@ -156,13 +156,13 @@ cv::Mat detectCard(cv::Mat &input, Options &options) {
                 auto h = cv::findHomography(approximatedPolygon, destinationPoints);
                 cv::Mat corrected;
                 cv::warpPerspective(frame, corrected, h, cv::Size(width, height));
-                cv::imwrite("debug/corrected.png", corrected);
+//                cv::imwrite("debug/corrected.png", corrected);
 
                 // Draw outline. Biggest contour
                 cv::Mat contours = frame.clone();
                 cv::Scalar color = cv::Scalar(0, 255, 0);
                 drawContours(contours, hulls, 0, color, 3, 8, std::vector<cv::Vec4i>(), 0, cv::Point());
-                cv::imwrite("debug/contours.png", contours);
+//                cv::imwrite("debug/contours.png", contours);
 
                 auto title = cv::Mat(corrected, cv::Rect(0, 0, width, (int) (height * 0.15f)));
 //                auto textBoxes = detectLetters(title);
@@ -246,14 +246,16 @@ int main(int argc, const char *const *argv) {
             cv::Mat detectedCard = detectCard(inputFrame, options);
             if (detectedCard.rows == 0 || detectedCard.cols == 0) {
                 std::cout << "No card detected\n";
-            } else {
-                std::cout << "CARD DETECTED!\n";
             }
             cv::waitKey();
         } else {
-            cv::Mat outputFrame = detectCard(inputFrame, options);
-            std::cout << "Save output image " << outputFilename << '\n';
-            cv::imwrite(outputFilename, outputFrame);
+            cv::Mat detectedCard = detectCard(inputFrame, options);
+            if (detectedCard.rows == 0 || detectedCard.cols == 0) {
+                std::cout << "No card detected\n";
+            } else {
+                std::cout << "CARD DETECTED!\n";
+                cv::imwrite(outputFilename, detectedCard);
+            }
         }
     } else if (options.useWebcam) {
         std::cout << "Capture video\n";
