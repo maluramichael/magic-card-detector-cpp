@@ -4,6 +4,8 @@
 #include <tesseract/baseapi.h>
 #include <random>
 #include <cmath>
+#include <boost/filesystem.hpp>
+
 #include "args.hxx"
 
 typedef std::vector<cv::Point> PointList;
@@ -75,6 +77,7 @@ PointList getPolygonFromHull(std::vector<cv::Point>& points) {
 
 struct Options {
   std::string imagePath = "";
+  std::string outputPath = "";
   bool useWebcam = false;
   bool showWindows = false;
   bool useOCR = false;
@@ -174,6 +177,7 @@ int main(int argc, const char* const* argv) {
     args::HelpFlag help(parser, "help", "Display this help menu", {'h', "help"});
     args::Group group(parser, "This group is all exclusive:", args::Group::Validators::Xor);
     args::ValueFlag<std::string> argImagePath(group, "image", "Image input path", {"image"});
+    args::ValueFlag<std::string> argOutputPath(parser, "output path", "Path where generated images are saved", {"output"});
     args::Flag argShowWindows(parser, "show", "Show windows", {"windows"});
     args::Flag argSaveDetectedCard(parser, "write", "Save detected card", {"save"});
     args::Flag argUseWebcam(group, "webcam", "Use webcam", {"webcam"});
@@ -200,6 +204,7 @@ int main(int argc, const char* const* argv) {
     
     Options options;
     options.imagePath = argImagePath.Get();
+    options.outputPath = argOutputPath.Get();
     options.useWebcam = argUseWebcam.Get();
     options.saveDetectedCard = argSaveDetectedCard.Get();
     options.showWindows = argShowWindows.Get();
@@ -217,11 +222,17 @@ int main(int argc, const char* const* argv) {
 #endif
     
     if (!options.imagePath.empty()) {
-        std::string& inputFilename = options.imagePath;
+        std::string inputFilename = options.imagePath;
         std::string outputFilename = inputFilename;
+        boost::filesystem::path currentPath(boost::filesystem::current_path());
         outputFilename = outputFilename.substr(0, outputFilename.rfind('.'));
         outputFilename = outputFilename.substr(outputFilename.rfind('/') + 1);
-        outputFilename = "./" + outputFilename + "_detected.png";
+        outputFilename += "_detected.png";
+        
+        if (!options.outputPath.empty()) {
+            currentPath = currentPath / options.outputPath;
+        }
+        currentPath = currentPath / outputFilename;
         
         cv::Mat inputFrame = cv::imread(options.imagePath);
         cv::resize(inputFrame, inputFrame, cv::Size(0, 0), 0.2, 0.2);
@@ -238,8 +249,8 @@ int main(int argc, const char* const* argv) {
                 std::cout << "No card detected\n";
             } else {
                 if (options.saveDetectedCard) {
-                    std::cout << "CARD DETECTED! " << outputFilename << "\n";
-                    cv::imwrite(outputFilename, detectedCard);
+                    std::cout << "CARD DETECTED! " << currentPath << "\n";
+                    cv::imwrite(currentPath.string(), detectedCard);
                 } else {
                     std::cout << "CARD DETECTED!\n";
                 }
