@@ -6,27 +6,16 @@
 #include <cmath>
 #include "args.hxx"
 
-int random(int a, int b) {
-    thread_local std::mt19937 eng{std::random_device{}()};
-    std::uniform_int_distribution<int> dist(a, b);
-    return dist(eng);
-}
-
 typedef std::vector<cv::Point> PointList;
 const float CARD_WIDTH = 57;
 const float CARD_HEIGHT = 82;
 const float CARD_ASPECT = CARD_HEIGHT / CARD_WIDTH;
-tesseract::TessBaseAPI *tess;
 
-double angleBetween(cv::Point &A, cv::Point &B) {
-    auto deltaX = B.x - A.x;
-    auto deltaY = B.y - A.y;
-    auto cout = 10;
+#ifdef USE_OCR
+tesseract::TessBaseAPI* tess;
+#endif
 
-    return atan2(deltaY, deltaX) * 180 / M_PI;
-}
-
-std::vector<cv::Rect> detectLetters(cv::Mat &img) {
+std::vector<cv::Rect> detectLetters(cv::Mat& img) {
     std::vector<cv::Rect> boundRect;
     cv::Mat grayImage, sobelImage, thresholdImage, element;
     cvtColor(img, grayImage, CV_BGR2GRAY);
@@ -37,7 +26,8 @@ std::vector<cv::Rect> detectLetters(cv::Mat &img) {
     std::vector<std::vector<cv::Point> > contours;
     cv::findContours(thresholdImage, contours, 0, 1);
     std::vector<std::vector<cv::Point> > contours_poly(contours.size());
-    for (int i = 0; i < contours.size(); i++) {
+    // TODO: replace with foreach
+    for (size_t i = 0; i < contours.size(); i++) {
         if (contours[i].size() > 100) {
             cv::approxPolyDP(cv::Mat(contours[i]), contours_poly[i], 3, true);
             cv::Rect appRect(boundingRect(cv::Mat(contours_poly[i])));
@@ -49,24 +39,25 @@ std::vector<cv::Rect> detectLetters(cv::Mat &img) {
     return boundRect;
 }
 
-std::vector<PointList> findCardContour(const cv::Mat &inputImage) {// Find contours inside the edges image
+std::vector<PointList> findCardContour(const cv::Mat& inputImage) {// Find contours inside the edges image
     std::vector<PointList> contours;
     std::vector<cv::Vec4i> hierarchy;
     findContours(inputImage, contours, hierarchy, CV_RETR_EXTERNAL, CV_CHAIN_APPROX_SIMPLE, cv::Point(0, 0));
     std::vector<PointList> hulls(contours.size());
-    for (int i = 0; i < contours.size(); i++) {
+    // TODO: replace with foreach
+    for (size_t i = 0; i < contours.size(); i++) {
         std::vector<cv::Point> hull;
         convexHull(cv::Mat(contours[i]), hull, false);
         hulls[i] = hull;
     }
-
+    
     // Sort hulls by their area
     sort(hulls.begin(), hulls.end(), [](std::vector<cv::Point> first, std::vector<cv::Point> second) {
-        auto areaA = contourArea(first);
-        auto areaB = contourArea(second);
-        return areaA > areaB;
+      auto areaA = contourArea(first);
+      auto areaB = contourArea(second);
+      return areaA > areaB;
     });
-
+    
     // Remove all hulls except the biggest one
     while (hulls.size() > 1) {
         hulls.pop_back();
@@ -74,7 +65,7 @@ std::vector<PointList> findCardContour(const cv::Mat &inputImage) {// Find conto
     return hulls;
 }
 
-PointList getPolygonFromHull(std::vector<cv::Point> &points) {
+PointList getPolygonFromHull(std::vector<cv::Point>& points) {
     // Get approximated polygon from hull
     auto epsilon = 0.04 * cv::arcLength(points, true);
     PointList approximatedPolygon;
@@ -83,69 +74,55 @@ PointList getPolygonFromHull(std::vector<cv::Point> &points) {
 }
 
 struct Options {
-    std::string imagePath = "";
-    bool useWebcam = false;
-    bool showWindows = false;
-    bool useOCR = false;
+  std::string imagePath = "";
+  bool useWebcam = false;
+  bool showWindows = false;
+  bool useOCR = false;
+  bool saveDetectedCard = false;
 };
 
-cv::Mat detectCard(cv::Mat &input, Options &options) {
+cv::Mat detectCard(cv::Mat& input, Options& options) {
     cv::Mat frame = input.clone();
     cv::Mat output;
     if (options.showWindows) { cv::imshow("original", frame); }
-
+    
     cv::Mat working;
     cv::cvtColor(frame, working, cv::COLOR_BGR2GRAY);
-
+    
     cv::blur(working, working, cv::Size(6, 6));
 //    cv::imwrite("debug/blured.png", working);
     if (options.showWindows) { cv::imshow("blured", working); }
-
+    
     cv::dilate(working, working, cv::Mat(), cv::Point(-1, -1), 3, 1, 1);
     if (options.showWindows) { cv::imshow("dilate", working); }
-
+    
     cv::threshold(working, working, 0, 255, CV_THRESH_OTSU + CV_THRESH_BINARY);
     //cv::adaptiveThreshold(working, working, 255, cv::ADAPTIVE_THRESH_MEAN_C, cv::THRESH_BINARY_INV, 105, 1);
 //    cv::imwrite("debug/threshold.png", working);
     if (options.showWindows) { cv::imshow("threshold", working); }
-
+    
     cv::Canny(working, working, 100, 200);
 //    cv::imwrite("debug/canny.png", working);
     if (options.showWindows) { cv::imshow("working", working); }
-
+    
     output = working.clone();
-
+    
     auto hulls = findCardContour(output);
-
+    
     if (hulls.size() == 1) {
         auto area = cv::contourArea(hulls[0]);
-
+        
         if (area > 3000) {
-
+            
             auto approximatedPolygon = getPolygonFromHull(hulls[0]);
-
+            
             // Remove current curvy hull
             hulls.pop_back();
-
+            
             if (approximatedPolygon.size() == 4) {
-
-                bool validRectangle = true;
-//                for (int i = 0; i < 4; i += 2) {
-//                    auto A = approximatedPolygon[i];
-//                    auto B = approximatedPolygon[i + 1];
-//
-//                    auto angle = abs(angleBetween(A, B));
-//                    std::cout << angle << '\n';
-//                    if (angle <= 170) {
-//                        validRectangle = false;
-//                        break;
-//                    }
-//                }
-
                 // Add better approximated polygon
                 hulls.push_back(approximatedPolygon);
-
-
+                
                 const int width = 600;
                 const auto height = (int) (width * CARD_ASPECT);
                 PointList destinationPoints;
@@ -157,13 +134,13 @@ cv::Mat detectCard(cv::Mat &input, Options &options) {
                 cv::Mat corrected;
                 cv::warpPerspective(frame, corrected, h, cv::Size(width, height));
 //                cv::imwrite("debug/corrected.png", corrected);
-
+                
                 // Draw outline. Biggest contour
                 cv::Mat contours = frame.clone();
                 cv::Scalar color = cv::Scalar(0, 255, 0);
                 drawContours(contours, hulls, 0, color, 3, 8, std::vector<cv::Vec4i>(), 0, cv::Point());
 //                cv::imwrite("debug/contours.png", contours);
-
+                
                 auto title = cv::Mat(corrected, cv::Rect(0, 0, width, (int) (height * 0.15f)));
 //                auto textBoxes = detectLetters(title);
 //                for (const auto &box: textBoxes) {
@@ -176,7 +153,7 @@ cv::Mat detectCard(cv::Mat &input, Options &options) {
 //                        std::cout << "Title: " << tess->GetUTF8Text() << '\n';
 //                    }
 //                }
-
+                
                 if (options.showWindows) {
                     cv::imshow("contours", contours);
                     cv::imshow("homography", corrected);
@@ -188,42 +165,47 @@ cv::Mat detectCard(cv::Mat &input, Options &options) {
             }
         }
     }
-
-
+    
     return cv::Mat();
 }
 
-int main(int argc, const char *const *argv) {
+int main(int argc, const char* const* argv) {
     args::ArgumentParser parser("Card detector");
     args::HelpFlag help(parser, "help", "Display this help menu", {'h', "help"});
     args::Group group(parser, "This group is all exclusive:", args::Group::Validators::Xor);
-    args::ValueFlag<std::string> argImagePath(group, "image", "Image input path", {'i'});
-    args::Flag argShowWindows(parser, "show", "Show windows", {'s'});
-    args::Flag argUseWebcam(group, "webcam", "Use webcam", {'w'});
-    args::ValueFlag<int> argCameraId(parser, "camera", "Camera id", {'c'});
-    args::Flag argUseOcr(parser, "ocr", "Use tesseract", {'o'});
+    args::ValueFlag<std::string> argImagePath(group, "image", "Image input path", {"image"});
+    args::Flag argShowWindows(parser, "show", "Show windows", {"windows"});
+    args::Flag argSaveDetectedCard(parser, "write", "Save detected card", {"save"});
+    args::Flag argUseWebcam(group, "webcam", "Use webcam", {"webcam"});
+    args::ValueFlag<int> argCameraId(parser, "camera", "Camera id", {"cameraid"});
 
+#ifdef USE_OCR
+    args::Flag argUseOcr(parser, "ocr", "Use tesseract", {"ocr"});
+#endif
+    
     try {
         parser.ParseCLI(argc, argv);
-    } catch (args::Help &) {
+    } catch (args::Help&) {
         std::cout << parser;
         return 0;
-    } catch (args::ParseError &e) {
+    } catch (args::ParseError& e) {
         std::cerr << e.what() << std::endl;
         std::cerr << parser;
         return 1;
-    } catch (args::ValidationError &e) {
+    } catch (args::ValidationError& e) {
         std::cerr << e.what() << std::endl;
         std::cerr << parser;
         return 1;
     }
-
+    
     Options options;
-    options.useOCR = argUseOcr.Get();
     options.imagePath = argImagePath.Get();
     options.useWebcam = argUseWebcam.Get();
+    options.saveDetectedCard = argSaveDetectedCard.Get();
     options.showWindows = argShowWindows.Get();
 
+#ifdef USE_OCR
+    options.useOCR = argUseOcr.Get();
     if (options.useOCR) {
         tess = new tesseract::TessBaseAPI();
         if (tess->Init(nullptr, "deu") != 0) {
@@ -232,16 +214,18 @@ int main(int argc, const char *const *argv) {
         }
         tess->SetPageSegMode(tesseract::PSM_SINGLE_LINE);
     }
-
+#endif
+    
     if (!options.imagePath.empty()) {
-        std::string &inputFilename = options.imagePath;
+        std::string& inputFilename = options.imagePath;
         std::string outputFilename = inputFilename;
         outputFilename = outputFilename.substr(0, outputFilename.rfind('.'));
-        outputFilename += "_converted.png";
-
+        outputFilename = outputFilename.substr(outputFilename.rfind('/') + 1);
+        outputFilename = "./" + outputFilename + "_detected.png";
+        
         cv::Mat inputFrame = cv::imread(options.imagePath);
         cv::resize(inputFrame, inputFrame, cv::Size(0, 0), 0.2, 0.2);
-
+        
         if (options.showWindows) {
             cv::Mat detectedCard = detectCard(inputFrame, options);
             if (detectedCard.rows == 0 || detectedCard.cols == 0) {
@@ -253,33 +237,39 @@ int main(int argc, const char *const *argv) {
             if (detectedCard.rows == 0 || detectedCard.cols == 0) {
                 std::cout << "No card detected\n";
             } else {
-                std::cout << "CARD DETECTED!\n";
-                cv::imwrite(outputFilename, detectedCard);
+                if (options.saveDetectedCard) {
+                    std::cout << "CARD DETECTED! " << outputFilename << "\n";
+                    cv::imwrite(outputFilename, detectedCard);
+                } else {
+                    std::cout << "CARD DETECTED!\n";
+                }
             }
         }
     } else if (options.useWebcam) {
         std::cout << "Capture video\n";
         cv::VideoCapture capture(1);
-
+        
         if (!capture.isOpened()) {
             return 1;
         }
-
+        
         for (;;) {
             cv::Mat frame;
             capture >> frame;
-
+            
             if (frame.empty()) { break; }
             cv::resize(frame, frame, cv::Size(0, 0), 0.4, 0.4);
             detectCard(frame, options);
-
+            
             if (cv::waitKey(1) == 27) { break; }
         }
     }
 
+#ifdef USE_OCR
     if (argUseOcr) {
         tess->End();
     }
-
+#endif
+    
     return 0;
 }

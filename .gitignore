@@ -6,3 +6,4 @@ images/*.txt
 *.bin
 *.dat
 debug/**
+build/
