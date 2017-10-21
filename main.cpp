@@ -45,7 +45,7 @@ std::vector<cv::Rect> detectLetters(cv::Mat &img) {
 PointList findCardContour(const cv::Mat &inputImage) {// Find contours inside the edges image
     std::vector<PointList> contours;
     std::vector<cv::Vec4i> hierarchy;
-    findContours(inputImage, contours, hierarchy, CV_RETR_EXTERNAL, CV_CHAIN_APPROX_SIMPLE, cv::Point(0, 0));
+    cv::findContours(inputImage, contours, hierarchy, CV_RETR_EXTERNAL, CV_CHAIN_APPROX_SIMPLE, cv::Point(0, 0));
     std::vector<PointList> hulls(contours.size());
     // TODO: replace with foreach
     for (size_t i = 0; i < contours.size(); i++) {
@@ -65,7 +65,7 @@ PointList findCardContour(const cv::Mat &inputImage) {// Find contours inside th
     return hulls[0];
 }
 
-PointList getPolygonFromHull(std::vector<cv::Point> &points) {
+PointList getPolygonFromHull(std::vector<cv::Point>& points) {
     // Get approximated polygon from hull
     auto epsilon = 0.04 * cv::arcLength(points, true);
     PointList approximatedPolygon;
@@ -89,8 +89,8 @@ void generateWindows() {
     int windowXPosition = 0;
     int windowYPosition = 0;
     int windowCount = 0;
-    const int windowSpacing = 400;
-    const int windowRowSize = 4;
+    const int windowSpacing = 500;
+    const int windowRowSize = 3;
 
     const std::string windows[] = {
             "original", "blured", "dilate", "threshold", "working", "cardOutline", "homography"
@@ -108,7 +108,8 @@ void generateWindows() {
     }
 }
 
-cv::Mat detectCard(cv::Mat &input, Options &options) {
+bool detectCard(cv::Mat& input, cv::Mat& output, Options& options) {
+
     cv::Mat imageOriginal = input.clone();
     cv::Mat imageOutput;
     if (options.showWindows) { cv::imshow("original", imageOriginal); }
@@ -116,7 +117,7 @@ cv::Mat detectCard(cv::Mat &input, Options &options) {
     cv::Mat imageWokring;
     cv::cvtColor(imageOriginal, imageWokring, cv::COLOR_BGR2GRAY);
 
-    cv::blur(imageWokring, imageWokring, cv::Size(6, 6));
+    cv::blur(imageWokring, imageWokring, cv::Size(3,3));
     if (options.showWindows) { cv::imshow("blured", imageWokring); }
 
     cv::dilate(imageWokring, imageWokring, cv::Mat(), cv::Point(-1, -1), 3, 1, 1);
@@ -125,7 +126,7 @@ cv::Mat detectCard(cv::Mat &input, Options &options) {
     cv::threshold(imageWokring, imageWokring, 0, 255, CV_THRESH_OTSU + CV_THRESH_BINARY);
     if (options.showWindows) { cv::imshow("threshold", imageWokring); }
 
-    cv::Canny(imageWokring, imageWokring, 100, 200);
+    cv::Canny(imageWokring, imageWokring, 50, 200);
     if (options.showWindows) { cv::imshow("working", imageWokring); }
 
     auto cardContourHull = findCardContour(imageWokring);
@@ -149,20 +150,17 @@ cv::Mat detectCard(cv::Mat &input, Options &options) {
                 targetRectangle.emplace_back(0, targetHeight); // Bottom Left
                 targetRectangle.emplace_back(0, 0); // Top Left
                 auto foundHomography = cv::findHomography(approximatedPolygon, targetRectangle);
-                cv::Mat imageCorrectedPerspective;
-                cv::warpPerspective(imageOriginal, imageCorrectedPerspective, foundHomography,
-                                    cv::Size(targetWidth, targetHeight));
+                cv::warpPerspective(imageOriginal, output, foundHomography, cv::Size(targetWidth, targetHeight));
 
                 // Draw outline. Biggest contour
                 cv::Mat imageCardOutline = imageOriginal.clone();
                 drawContours(imageCardOutline, listContainingCardContour, 0, cv::Scalar(0, 255, 0), 3);
 
-                auto rect = cv::minAreaRect(approximatedPolygon);
-                std::cout << "Bounding box angle " << rect.angle << '\n';
+                // auto rect = cv::minAreaRect(approximatedPolygon);
+                // std::cout << "Bounding box angle " << rect.angle << '\n';
 //                drawContours(imageCardOutline, listContainingCardContour, 0, cv::Scalar(0, 255, 0), 3);
 
-                auto title = cv::Mat(imageCorrectedPerspective,
-                                     cv::Rect(0, 0, targetWidth, (int) (targetHeight * 0.15f)));
+                // auto title = cv::Mat(imageCorrectedPerspective, cv::Rect(0, 0, targetWidth, (int) (targetHeight * 0.15f)));
 //                auto textBoxes = detectLetters(title);
 //                for (const auto &box: textBoxes) {
 //                    cv::rectangle(title, box, cv::Scalar(255, 255, 0), 3, 8, 0);
@@ -177,13 +175,76 @@ cv::Mat detectCard(cv::Mat &input, Options &options) {
 
                 if (options.showWindows) {
                     cv::imshow("cardOutline", imageCardOutline);
-                    cv::imshow("homography", imageCorrectedPerspective);
+                    cv::imshow("homography", output);
                 }
 
-
-                return imageCorrectedPerspective;
+                return true;
             }
         }
+    }
+    return false;
+}
+
+bool detectTitle(cv::Mat& input, cv::Mat& output, Options& options){
+    
+    cv::cvtColor(input, output, cv::COLOR_BGR2GRAY);
+
+    cv::blur(output, output, cv::Size(3,3));
+    if (options.showWindows) { cv::imshow("description_blured", output); }
+
+    cv::dilate(output, output, cv::Mat(), cv::Point(-1, -1), 3, 1, 1);
+    if (options.showWindows) { cv::imshow("description_dilate", output); }
+
+    cv::threshold(output, output, 50, 255, CV_THRESH_OTSU + CV_THRESH_BINARY);
+    if (options.showWindows) { cv::imshow("description_threshold", output); }
+
+    cv::Canny(output, output, 50, 200);
+    if (options.showWindows) { cv::imshow("description_working", output); }
+
+    std::vector<PointList> contours;
+    std::vector<cv::Vec4i> hierarchy;
+    cv::findContours(output, contours, hierarchy, CV_RETR_TREE, CV_CHAIN_APPROX_SIMPLE, cv::Point(0, 0));
+    std::vector<PointList> polygons;
+
+    for (const auto& contour: contours) {
+        std::vector<cv::Point> points;
+        cv::convexHull(cv::Mat(contour), points, false);
+        auto area = contourArea(points);
+        if (area > 3000){
+            auto approximatedPolygon = getPolygonFromHull(points);
+            if (approximatedPolygon.size() == 4) {
+                polygons.push_back(approximatedPolygon);
+            }
+        }
+    }
+
+    std::cout << "Found " << polygons.size() << " polygons\n";    
+
+    // Sort polygons by their area
+    sort(polygons.begin(), polygons.end(), [](std::vector<cv::Point> first, std::vector<cv::Point> second) {
+        auto areaA = contourArea(first);
+        auto areaB = contourArea(second);
+        return areaA > areaB;
+    });
+
+    // Draw outline. Biggest contour
+    cv::Mat imageOutline = input.clone();
+    for(int index = 0; index < polygons.size(); index++) {
+        drawContours(imageOutline, polygons, index, cv::Scalar(0, 255, 0), 3);
+    }
+
+    if (options.showWindows) { cv::imshow("description_working", imageOutline); }
+
+    return false;
+}
+
+cv::Mat handleImage(cv::Mat &input, Options &options) {
+    cv::Mat imageDetectedCard;
+    bool cardDetected = detectCard(input, imageDetectedCard, options);
+
+    if (cardDetected) {
+        cv::Mat imageTitle;
+        detectTitle(imageDetectedCard, imageTitle, options);
     }
 
     return cv::Mat();
@@ -284,7 +345,7 @@ int main(int argc, const char *const *argv) {
                     cv::resize(inputFrame, inputFrame, cv::Size(0, 0), 0.2, 0.2);
                     imagePaths[currentImage->first] = inputFrame;
                 }
-                detectCard(imagePaths[currentImage->first], options);
+                handleImage(imagePaths[currentImage->first], options);
 
                 auto key = cv::waitKey(1000);
                 switch (key) {
@@ -315,7 +376,7 @@ int main(int argc, const char *const *argv) {
 //            cv::Mat inputFrame = cv::imread(options.imagePath);
 //            cv::resize(inputFrame, inputFrame, cv::Size(0, 0), 0.2, 0.2);
 //
-//            cv::Mat detectedCard = detectCard(inputFrame, options);
+//            cv::Mat detectedCard = handleImage(inputFrame, options);
 //            if (detectedCard.rows == 0 || detectedCard.cols == 0) {
 //                std::cout << "No card detected\n";
 //            } else {
@@ -341,7 +402,7 @@ int main(int argc, const char *const *argv) {
 //
 //            if (frame.empty()) { break; }
 //            cv::resize(frame, frame, cv::Size(0, 0), 0.4, 0.4);
-//            detectCard(frame, options);
+//            handleImage(frame, options);
 //
 //            if (cv::waitKey(1) == 27) { break; }
 //        }
