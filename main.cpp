@@ -15,9 +15,7 @@ const float CARD_WIDTH = 57;
 const float CARD_HEIGHT = 82;
 const float CARD_ASPECT = CARD_HEIGHT / CARD_WIDTH;
 
-#ifdef USE_OCR
 tesseract::TessBaseAPI* tess;
-#endif
 
 std::vector<cv::Rect> detectLetters(cv::Mat &img) {
     std::vector<cv::Rect> boundRect;
@@ -118,7 +116,7 @@ template <typename I> std::string n2hexstr(I w, size_t hex_len = sizeof(I)<<1) {
 }
 
 cv::Mat createDHash(cv::Mat &input) {
-    cv::Mat image = input.clone();
+    // cv::Mat image = input.clone();
 //    cv::resize(image, image, cv::Size(9, 8)); // Reduce size
 //    cv::cvtColor(image, image, cv::COLOR_BGR2GRAY); // Convert to gray
 //
@@ -143,16 +141,16 @@ cv::Mat createDHash(cv::Mat &input) {
 //
 //    cv::resize(image, image, cv::Size(400, 400), 0, 0, cv::INTER_NEAREST);
 
-
     auto algo = cv::img_hash::AverageHash::create();
-    algo->compute(image, image);
-    cv::resize(image, image, cv::Size(400, 400), 0, 0, cv::INTER_NEAREST);
-
-    return image;
+    cv::Mat hash;
+    algo->compute(input, hash);
+    return hash;
+    // cv::resize(image, image, cv::Size(400, 400), 0, 0, cv::INTER_NEAREST);
+    // return image;
 }
 
 bool detectCard(cv::Mat &input, cv::Mat &output, Options &options) {
-
+    std::cout << "Process image\n";
     cv::Mat imageOriginal = input.clone();
     cv::Mat imageOutput;
     if (options.showWindows) { cv::imshow("original", imageOriginal); }
@@ -180,6 +178,8 @@ bool detectCard(cv::Mat &input, cv::Mat &output, Options &options) {
         if (area > 3000) {
             auto approximatedPolygon = getPolygonFromHull(cardContourHull);
             if (approximatedPolygon.size() == 4) {
+                std::cout << "Found card\n";
+    
                 // Add better approximated polygon
 
                 std::vector<PointList> listContainingCardContour;
@@ -203,18 +203,17 @@ bool detectCard(cv::Mat &input, cv::Mat &output, Options &options) {
                 // std::cout << "Bounding box angle " << rect.angle << '\n';
 //                drawContours(imageCardOutline, listContainingCardContour, 0, cv::Scalar(0, 255, 0), 3);
 
-                // auto title = cv::Mat(imageCorrectedPerspective, cv::Rect(0, 0, targetWidth, (int) (targetHeight * 0.15f)));
-//                auto textBoxes = detectLetters(title);
-//                for (const auto &box: textBoxes) {
-//                    cv::rectangle(title, box, cv::Scalar(255, 255, 0), 3, 8, 0);
-//                    if (tess != nullptr) {
-//                        auto subBox = cv::Mat(title, box);
-//                        tess->SetImage((uchar *) subBox.data, subBox.size().width, subBox.size().height,
-//                                       subBox.channels(), subBox.step1());
-//                        tess->Recognize(0);
-//                        std::cout << "Title: " << tess->GetUTF8Text() << '\n';
-//                    }
-//                }
+                auto title = cv::Mat(output.clone(), cv::Rect(50, 60, (int)output.size().width - 160, 40 ));
+                cv::cvtColor(title, title, cv::COLOR_BGR2GRAY);
+                cv::threshold(title, title, 50, 255, CV_THRESH_OTSU + CV_THRESH_BINARY);
+                
+                cv::imwrite("title.debug.png", title);
+
+                if (tess != nullptr) {
+                    tess->SetImage((uchar *) title.data, title.size().width, title.size().height, title.channels(), title.step1());
+                    tess->Recognize(0);
+                    std::cout << "Title: " << tess->GetUTF8Text() << '\n';
+                }
 
                 if (options.showWindows) {
                     cv::imshow("cardOutline", imageCardOutline);
@@ -286,10 +285,13 @@ cv::Mat handleImage(cv::Mat &input, Options &options) {
     bool cardDetected = detectCard(input, imageDetectedCard, options);
 
     if (cardDetected) {
-        cv::Mat imageTitle;
-        detectTitle(imageDetectedCard, imageTitle, options);
+        std::cout << "Card detected\n";
+        
+        // cv::Mat imageTitle;
+        // detectTitle(imageDetectedCard, imageTitle, options);
 
         cv::Mat imageHashed = createDHash(imageDetectedCard);
+        std::cout << imageHashed << '\n';
         if (options.showWindows) { cv::imshow("hashed_image", imageHashed); }
 
     }
@@ -314,10 +316,7 @@ int main(int argc, const char *const *argv) {
     args::Flag argSaveDetectedCard(parser, "write", "Save detected card", {"save"});
     args::Flag argUseWebcam(group, "webcam", "Use webcam", {"webcam"});
     args::ValueFlag<int> argCameraId(parser, "camera", "Camera id", {"cameraid"});
-
-#ifdef USE_OCR
     args::Flag argUseOcr(parser, "ocr", "Use tesseract", {"ocr"});
-#endif
 
     try {
         parser.ParseCLI(argc, argv);
@@ -345,22 +344,20 @@ int main(int argc, const char *const *argv) {
     options.cameraId = argCameraId.Get();
     options.inputDirectory = argInputDirectory.Get();
 
-#ifdef USE_OCR
     options.useOCR = argUseOcr.Get();
-    if (options.useOCR) {
-        tess = new tesseract::TessBaseAPI();
-        if (tess->Init(nullptr, "deu") != 0) {
-            std::cout << "Could not initialize tesseract.\n";
-            exit(1);
-        }
-        tess->SetPageSegMode(tesseract::PSM_SINGLE_LINE);
+    tess = new tesseract::TessBaseAPI();
+    if (tess->Init(nullptr, "mtg") != 0) {
+        std::cout << "Could not initialize tesseract.\n";
+        exit(1);
     }
-#endif
+    tess->SetPageSegMode(tesseract::PSM_SINGLE_LINE);
+
+    std::map<std::string, cv::Mat> imagePaths;
+   
 
     if (!options.inputDirectory.empty()) {
         boost::filesystem::path inputDirectoryPath(options.inputDirectory);
 
-        std::map<std::string, cv::Mat> imagePaths;
 
         // cycle through the directory
         for (boost::filesystem::directory_iterator iterator(inputDirectoryPath);
@@ -378,15 +375,19 @@ int main(int argc, const char *const *argv) {
                 }
             }
         }
+    }
 
+    if (!options.imagePath.empty()) {
+        imagePaths[options.imagePath] = cv::Mat();
+    }
 
-        if (imagePaths.size() > 0) {
-            bool running = true;
+    if (imagePaths.size() > 0) {
+        bool running = true;
 
-            std::map<std::string, cv::Mat>::iterator currentImage = imagePaths.begin();
+        std::map<std::string, cv::Mat>::iterator currentImage = imagePaths.begin();
 
+        if (options.showWindows) {
             while (running) {
-
                 if (currentImage->second.rows == 0) {
                     std::cout << "Load " << currentImage->first << '\n';
                     cv::Mat inputFrame = cv::imread(currentImage->first);
@@ -414,6 +415,14 @@ int main(int argc, const char *const *argv) {
                         if (key != -1) std::cout << key << " pressed\n";
                         break;
                 }
+            }
+        } else {
+            while(currentImage != imagePaths.end()) {
+                std::cout << "Load " << currentImage->first << '\n';
+                cv::Mat inputFrame = cv::imread(currentImage->first);
+                // cv::resize(inputFrame, inputFrame, cv::Size(0, 0), 0.2, 0.2);
+                handleImage(inputFrame, options);
+                currentImage++;
             }
         }
     }
@@ -456,11 +465,7 @@ int main(int argc, const char *const *argv) {
 //        }
 //    }
 
-#ifdef USE_OCR
-    if (argUseOcr) {
-        tess->End();
-    }
-#endif
+    tess->End();
 
     return 0;
 }
