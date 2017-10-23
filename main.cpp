@@ -1,6 +1,7 @@
 #include <iostream>
 #include <vector>
 #include <opencv2/opencv.hpp>
+#include <opencv2/img_hash.hpp>
 #include <tesseract/baseapi.h>
 #include <random>
 #include <cmath>
@@ -65,7 +66,7 @@ PointList findCardContour(const cv::Mat &inputImage) {// Find contours inside th
     return hulls[0];
 }
 
-PointList getPolygonFromHull(std::vector<cv::Point>& points) {
+PointList getPolygonFromHull(std::vector<cv::Point> &points) {
     // Get approximated polygon from hull
     auto epsilon = 0.04 * cv::arcLength(points, true);
     PointList approximatedPolygon;
@@ -108,7 +109,49 @@ void generateWindows() {
     }
 }
 
-bool detectCard(cv::Mat& input, cv::Mat& output, Options& options) {
+template <typename I> std::string n2hexstr(I w, size_t hex_len = sizeof(I)<<1) {
+    static const char* digits = "0123456789ABCDEF";
+    std::string rc(hex_len,'0');
+    for (size_t i=0, j=(hex_len-1)*4 ; i<hex_len; ++i,j-=4)
+        rc[i] = digits[(w>>j) & 0x0f];
+    return rc;
+}
+
+cv::Mat createDHash(cv::Mat &input) {
+    cv::Mat image = input.clone();
+//    cv::resize(image, image, cv::Size(9, 8)); // Reduce size
+//    cv::cvtColor(image, image, cv::COLOR_BGR2GRAY); // Convert to gray
+//
+//    long long hash = 0L;
+//
+//    int bit = 0;
+//    for (int row = 0; row < image.rows; row++) {
+//
+//        for (int column = 0; column < image.cols - 1; column++) {
+//            auto A = (int)image.data[row * 9 + column];
+//            auto B = (int)image.data[row * 9 + column + 1];
+//            if (A < B){
+//                hash |= 1 << bit;
+//            }
+//
+//            bit++;
+//        }
+//
+//    }
+//
+//    std::cout << "Fingerprint " << hash << "\n";
+//
+//    cv::resize(image, image, cv::Size(400, 400), 0, 0, cv::INTER_NEAREST);
+
+
+    auto algo = cv::img_hash::AverageHash::create();
+    algo->compute(image, image);
+    cv::resize(image, image, cv::Size(400, 400), 0, 0, cv::INTER_NEAREST);
+
+    return image;
+}
+
+bool detectCard(cv::Mat &input, cv::Mat &output, Options &options) {
 
     cv::Mat imageOriginal = input.clone();
     cv::Mat imageOutput;
@@ -117,7 +160,7 @@ bool detectCard(cv::Mat& input, cv::Mat& output, Options& options) {
     cv::Mat imageWokring;
     cv::cvtColor(imageOriginal, imageWokring, cv::COLOR_BGR2GRAY);
 
-    cv::blur(imageWokring, imageWokring, cv::Size(3,3));
+    cv::blur(imageWokring, imageWokring, cv::Size(3, 3));
     if (options.showWindows) { cv::imshow("blured", imageWokring); }
 
     cv::dilate(imageWokring, imageWokring, cv::Mat(), cv::Point(-1, -1), 3, 1, 1);
@@ -185,11 +228,11 @@ bool detectCard(cv::Mat& input, cv::Mat& output, Options& options) {
     return false;
 }
 
-bool detectTitle(cv::Mat& input, cv::Mat& output, Options& options){
-    
+bool detectTitle(cv::Mat &input, cv::Mat &output, Options &options) {
+
     cv::cvtColor(input, output, cv::COLOR_BGR2GRAY);
 
-    cv::blur(output, output, cv::Size(3,3));
+    cv::blur(output, output, cv::Size(3, 3));
     if (options.showWindows) { cv::imshow("description_blured", output); }
 
     cv::dilate(output, output, cv::Mat(), cv::Point(-1, -1), 3, 1, 1);
@@ -206,11 +249,11 @@ bool detectTitle(cv::Mat& input, cv::Mat& output, Options& options){
     cv::findContours(output, contours, hierarchy, CV_RETR_TREE, CV_CHAIN_APPROX_SIMPLE, cv::Point(0, 0));
     std::vector<PointList> polygons;
 
-    for (const auto& contour: contours) {
+    for (const auto &contour: contours) {
         std::vector<cv::Point> points;
         cv::convexHull(cv::Mat(contour), points, false);
         auto area = contourArea(points);
-        if (area > 3000){
+        if (area > 3000) {
             auto approximatedPolygon = getPolygonFromHull(points);
             if (approximatedPolygon.size() == 4) {
                 polygons.push_back(approximatedPolygon);
@@ -218,7 +261,7 @@ bool detectTitle(cv::Mat& input, cv::Mat& output, Options& options){
         }
     }
 
-    std::cout << "Found " << polygons.size() << " polygons\n";    
+    std::cout << "Found " << polygons.size() << " polygons\n";
 
     // Sort polygons by their area
     sort(polygons.begin(), polygons.end(), [](std::vector<cv::Point> first, std::vector<cv::Point> second) {
@@ -229,7 +272,7 @@ bool detectTitle(cv::Mat& input, cv::Mat& output, Options& options){
 
     // Draw outline. Biggest contour
     cv::Mat imageOutline = input.clone();
-    for(int index = 0; index < polygons.size(); index++) {
+    for (int index = 0; index < polygons.size(); index++) {
         drawContours(imageOutline, polygons, index, cv::Scalar(0, 255, 0), 3);
     }
 
@@ -245,7 +288,12 @@ cv::Mat handleImage(cv::Mat &input, Options &options) {
     if (cardDetected) {
         cv::Mat imageTitle;
         detectTitle(imageDetectedCard, imageTitle, options);
+
+        cv::Mat imageHashed = createDHash(imageDetectedCard);
+        if (options.showWindows) { cv::imshow("hashed_image", imageHashed); }
+
     }
+
 
     return cv::Mat();
 }
@@ -347,7 +395,7 @@ int main(int argc, const char *const *argv) {
                 }
                 handleImage(imagePaths[currentImage->first], options);
 
-                auto key = cv::waitKey(1000);
+                auto key = cv::waitKey();
                 switch (key) {
                     case 27: // esc
                         running = false;
