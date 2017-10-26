@@ -25,10 +25,9 @@ include_directories(/usr/local/include/)
 link_directories(/usr/local/lib/)
 
 # application
-set(SOURCE_FILES main.cpp)
-add_executable(carddetector ${SOURCE_FILES})
-target_link_libraries(carddetector
-        ${OpenCV_LIBS}
-        ${Boost_LIBRARIES}
-        tesseract
-        )
+add_executable(carddetector main.cpp)
+add_executable(hash Hash.cpp)
+add_executable(ocr OCR.cpp)
+target_link_libraries(carddetector ${OpenCV_LIBS} ${Boost_LIBRARIES} tesseract)
+target_link_libraries(hash ${OpenCV_LIBS} ${Boost_LIBRARIES} tesseract)
+target_link_libraries(ocr ${OpenCV_LIBS} ${Boost_LIBRARIES} tesseract)
